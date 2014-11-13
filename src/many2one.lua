@@ -30,7 +30,7 @@ end
 local luaCode = {}
 local args = {...}
 local configFile = args[1] or "Config.lua"
-print("Many2One version 1.14.09.19"
+print("Many2One version 1.14.11.12")
 print("Usage: lua many2one.lua [configFile]")
 print("For usage and help see:  http://milindsweb.amved.com/Many2One.html")
 print(" ")
