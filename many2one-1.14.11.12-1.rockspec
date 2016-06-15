@@ -1,8 +1,8 @@
 package = "many2one"
-version = "1.14.09.19-1"
+version = "1.14.11.12-1"
 source = {
 	url = "git://github.com/aryajur/many2one",
-	tag = "1.14.09"
+	tag = "1.14.11"
 }
 description = {
 	summary = "Convert application spanning multiple Lua files to 1",
