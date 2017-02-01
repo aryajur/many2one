@@ -30,26 +30,36 @@ end
 local luaCode = {}
 local args = {...}
 local configFile = args[1] or "Config.lua"
-print("Many2One version 1.14.11.12")
+print("Many2One version 1.17.1.31")
 print("Usage: lua many2one.lua [configFile]")
 print("For usage and help see:  http://milindsweb.amved.com/Many2One.html")
 print(" ")
+local screen = io.output(io.stdout)
 local f=io.open(configFile,"r")
 if f~=nil then 
 	f:close() 
 	-- load the configuration file
+	screen:write("Read Configuration file "..configFile.."...")
 	dofile(configFile)
+	screen:write("DONE\n")
 	if not fileList then
 		print("No fileList table defined by the configuration file. Exiting")
 	else
 		local mf = mainFile or fileList[1]
+		print("Processing the main file: "..mf)
 		for i = 1,#fileList do
 			-- Convert all files except the main file to strings
-			if fileList[i] ~= mf then
-				f = io.open(fileList[i],"r")
+			if type(fileList[i]) == "string" and fileList[i] ~= mf or type(fileList[i]) == "table" and fileList[i][1] ~= mf then
+				local fn = (type(fileList[i]) == "string" and fileList[i]) or (type(fileList[i]) == "table" and fileList[i][1])
+				print("Reading "..fn.." to include.")
+				f = io.open(fn,"r")
 				if f ~=nil then
 					local fileStr = f:read("*a")
-					luaCode[fileTitle(fileList[i])] = fileStr
+					if type(fileList[i]) == "table" then
+						luaCode[fileList[i][2]] = fileStr
+					else
+						luaCode[fileTitle(fileList[i])] = fileStr
+					end
 					f:close()
 				end
 			end
@@ -89,14 +99,10 @@ if f~=nil then
 		local addedFiles = {}
 		-- Now find and replace  require in all the read files with the custom code
 		for k,v in pairs(luaCode) do
-			local added = nil
 			for k1,v1 in pairs(luaCode) do
-				local pre,post = v:find("require%([%\"%']"..k1.."[%\"%']%)")
-				if pre and not added then
-					luaCode[k] = "local requireLuaString = requireLuaString\n"..v
-				end
+				local pre,post = v:find("require%s*%(?%s*[%\"%']"..k1.."[%\"%']%s*%)?%s*")
 				if pre then
-					luaCode[k] = luaCode[k]:gsub("require%([%\"%']"..k1.."[%\"%']%)","requireLuaString('"..k1.."')")
+					luaCode[k] = luaCode[k]:gsub("require%s*%(?%s*[%\"%']"..k1.."[%\"%']%s*%)?","requireLuaString('"..k1.."')\n")
 					if not addedFiles[k1] then
 						addedFiles[k1] = true
 					end
@@ -104,10 +110,12 @@ if f~=nil then
 			end
 		end
 		-- Add all the required files in the beginning of Main file in MailFilePre
+		print("Including all files in the beginning of the output file")
 		for k,v in pairs(addedFiles) do
 			mainFilePre = mainFilePre.."__MANY2ONEFILES['"..k.."']="..string.format("%q",luaCode[k]).."\n"
 		end
 		-- Now write the main code output file
+		print("Generate the output file")
 		local of = outputFile or "output.lua"
 		local fo = io.open(of,"w+")
 		f = io.open(mf,"r")
@@ -115,9 +123,9 @@ if f~=nil then
 		f:close()
 		-- Replace all require in main file with custom code
 		for k,v in pairs(luaCode) do
-			local pre,post = mainFileStr:find("require%([%\"%']"..k.."[%\"%']%)")
+			local pre,post = mainFileStr:find("require%s*%(?%s*[%\"%']"..k.."[%\"%']%s*%)?%s*")
 			if pre then
-				mainFileStr = mainFileStr:gsub("require%([%\"%']"..k.."[%\"%']%)","requireLuaString('"..k.."')")
+				mainFileStr = mainFileStr:gsub("require%s*%(?%s*[%\"%']"..k.."[%\"%']%s*%)?","requireLuaString('"..k.."')\n")
 				if not addedFiles[k] then
 					mainFilePre = mainFilePre.."__MANY2ONEFILES['"..k.."']="..string.format("%q",v).."\n"
 					addedFiles[k] = true

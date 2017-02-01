@@ -1,5 +1,5 @@
 package = "many2one"
-version = "1.14.11.12-1"
+version = "1.14.11.12-4"
 source = {
 	url = "git://github.com/aryajur/many2one",
 	tag = "1.14.11"
@@ -19,5 +19,10 @@ build = {
 	type = "builtin",
 	modules = {
 		many2one = "src/many2one.lua"
-	}
+	},
+    install = {
+        bin = {
+            "src/many2one.lua",
+        },
+    },
 }
