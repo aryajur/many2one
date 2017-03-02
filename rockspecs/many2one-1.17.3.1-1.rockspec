@@ -18,7 +18,7 @@ dependencies = {
 build = {
 	type = "builtin",
 	modules = {
-		many2one = "src/many2one.lua"
+		many2one = "../src/many2one.lua"
 	},
     install = {
         bin = {
