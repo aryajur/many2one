@@ -1,8 +1,9 @@
 -- many2one lua program to combine many lua files (linked by require) to one lua file for easy distribution
 -- Written by Milind Gupta
 -- For usage and questions visit http://milindsweb.amved.com/Many2One.html
--- The way it does is to read all files and convert them to strings and to replace the require for each file with a special 
--- require that uses loadstring rather than loadfile
+-- The way it does is to read all files and convert them to strings and wraps the require function to check if
+-- it has the file as a string then it sources the code from the string otherwise the normal require function works as before
+
 
 function fileTitle(path)
 	-- Find the name of the file without extension (that would be in Lua)
@@ -30,7 +31,7 @@ end
 local luaCode = {}
 local args = {...}
 local configFile = args[1] or "Config.lua"
-print("Many2One version 1.17.1.31")
+print("Many2One version 1.17.3.1")
 print("Usage: lua many2one.lua [configFile]")
 print("For usage and help see:  http://milindsweb.amved.com/Many2One.html")
 print(" ")
@@ -67,36 +68,49 @@ if f~=nil then
 		-- Add the files in the begining of the main file
 		local mainFilePre
 		if loadstring then
-			mainFilePre = [[__MANY2ONEFILES={}
-			function requireLuaString(str) 
-				if not package.loaded[str] then 
-					package.loaded[str] = true
-					local res = loadstring(__MANY2ONEFILES[str])
-					res = res(str)
-					if res ~= nil then
-						package.loaded[str] = res
-						_G[str] = str
-					end
-				end 
-				return package.loaded[str] 
-			end
-			]]
+			mainFilePre = [[do
+	local __MANY2ONEFILES={}
+	local reqCopy = require 
+	require = function(str)
+		if __MANY2ONEFILES[str] then
+			if not package.loaded[str] then 
+				package.loaded[str] = true
+				local res = loadstring(__MANY2ONEFILES[str])
+				res = res(str)
+				if res ~= nil then
+					package.loaded[str] = res
+					_G[str] = str
+				end
+			end 
+			return package.loaded[str] 		
 		else
-			mainFilePre = [[__MANY2ONEFILES={}
-			function requireLuaString(str) 
-				if not package.loaded[str] then 
-					package.loaded[str] = true
-					local res = load(__MANY2ONEFILES[str])
-					res = res(str)
-					if res ~= nil then
-						package.loaded[str] = res
-					end
-				end 
-				return package.loaded[str] 
-			end
-			]]
+			return reqCopy(str)
+		end
+	end
+]]
+		else
+			mainFilePre = [[do
+	local __MANY2ONEFILES={}
+	local reqCopy = require 
+	require = function(str)
+		if __MANY2ONEFILES[str] then
+			if not package.loaded[str] then 
+				package.loaded[str] = true
+				local res = load(__MANY2ONEFILES[str])
+				res = res(str)
+				if res ~= nil then
+					package.loaded[str] = res
+				end
+			end 
+			return package.loaded[str] 		
+		else
+			return reqCopy(str)
+		end
+	end
+]]
 		end
 		local addedFiles = {}
+		--[[
 		-- Now find and replace  require in all the read files with the custom code
 		for k,v in pairs(luaCode) do
 			for k1,v1 in pairs(luaCode) do
@@ -108,12 +122,17 @@ if f~=nil then
 					end
 				end
 			end
+		end]]
+		-- Add all files listed in the config
+		for k,v in pairs(luaCode) do
+			addedFiles[k] = true
 		end
 		-- Add all the required files in the beginning of Main file in MailFilePre
 		print("Including all files in the beginning of the output file")
 		for k,v in pairs(addedFiles) do
-			mainFilePre = mainFilePre.."__MANY2ONEFILES['"..k.."']="..string.format("%q",luaCode[k]).."\n"
+			mainFilePre = mainFilePre.."\t__MANY2ONEFILES['"..k.."']="..string.format("%q",luaCode[k]).."\n"
 		end
+		mainFilePre = mainFilePre.."end\n"	-- To end the do scope block
 		-- Now write the main code output file
 		print("Generate the output file")
 		local of = outputFile or "output.lua"
@@ -122,6 +141,7 @@ if f~=nil then
 		local mainFileStr = f:read("*a")
 		f:close()
 		-- Replace all require in main file with custom code
+		--[[
 		for k,v in pairs(luaCode) do
 			local pre,post = mainFileStr:find("require%s*%(?%s*[%\"%']"..k.."[%\"%']%s*%)?%s*")
 			if pre then
@@ -131,7 +151,7 @@ if f~=nil then
 					addedFiles[k] = true
 				end
 			end
-		end
+		end]]
 		mainFileStr = mainFilePre..mainFileStr
 		fo:write(mainFileStr)
 		fo:close()
