@@ -22,7 +22,7 @@ build = {
 	},
     install = {
         bin = {
-            "src/many2one.lua",
+            "../src/many2one.lua",
         },
     },
 }
