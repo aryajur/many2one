@@ -4,6 +4,31 @@
 -- The way it does is to read all files and convert them to strings and wraps the require function to check if
 -- it has the file as a string then it sources the code from the string otherwise the normal require function works as before
 
+-- KNOWN ISSUES:
+-- If using multithreading using for example like llthreads, to reuse all the included modules in the thread do the following:
+--     * The __MANY2ONEFILES declaration in the beginning of the combined file should be made global instead of local
+--     * The following code should be added to the beginning of the thread code to refer these included modules:
+--[[
+		do
+			local reqCopy = require 
+			require = function(str)
+				if __MANY2ONEFILES[str] then
+					if not package.loaded[str] then 
+						package.loaded[str] = true
+						local res = load(__MANY2ONEFILES[str])
+						res = res(str)
+						if res ~= nil then
+							package.loaded[str] = res
+						end
+					end 
+					return package.loaded[str] 		
+				else
+					return reqCopy(str)
+				end
+			end
+		end
+]]
+
 
 function fileTitle(path)
 	-- Find the name of the file without extension (that would be in Lua)
