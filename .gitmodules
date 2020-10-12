@@ -1,0 +1,6 @@
+[submodule "src/lua-minify"]
+	path = src/lua-minify
+	url = https://github.com/stravant/lua-minify.git
+[submodule "src/lualzw"]
+	path = src/lualzw
+	url = https://github.com/Rochet2/lualzw.git

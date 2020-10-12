@@ -4,7 +4,19 @@
 -- The way it does is to read all files and convert them to strings and wraps the require function to check if
 -- it has the file as a string then it sources the code from the string otherwise the normal require function works as before
 
--- KNOWN ISSUES:
+-- Config File Example
+--[[
+exclude = {
+	"llthreads",
+	"cURL"
+}
+ 
+mainFile = "myscript.lua"
+outputFile = "myScriptApp.lua"
+deployDir = "../deploy/"
+]]
+
+-- CAUTION:
 -- If using multithreading using for example like llthreads, to reuse all the included modules in the thread do the following:
 --     * The __MANY2ONEFILES declaration in the beginning of the combined file should be made global instead of local
 --     * The following code should be added to the beginning of the thread code to refer these included modules:
@@ -29,71 +41,171 @@
 		end
 ]]
 
+-- TODO:
+-- 1. Add a include table to include files which not found through searching for require
+-- 2. Remove commented text before doing require search
+-- 3. Add option to have __MANY2ONEFILES global
 
-function fileTitle(path)
-	-- Find the name of the file without extension (that would be in Lua)
-	local strVar
-	local intVar1 = -1
-	for intVar = #path,1,-1 do
-		if string.sub(path, intVar, intVar) == "." then
-	    	intVar1 = intVar
-		end
-		if string.sub(path, intVar, intVar) == "\\" or string.sub(path, intVar, intVar) == "/" then
-	    	strVar = string.sub(path, intVar + 1, intVar1-1)
-	    	break
-		end
-	end
-	if not strVar then
-		if intVar1 ~= -1 then
-			strVar = path:sub(1,intVar1-1)
-		else
-			strVar = path
-		end
-	end
-	return strVar
-end
+require("submodsearcher")
+
+local tu = require("tableUtils")
+local lfs = require("lfs")
+local diskOP = require("diskOP")
+
+local logConsole = require("logging.console")
+
+local logger = logConsole()
+
+local ap = require("argparse")
+local parser = ap():name("Many2One"):description("This app helps package a Lua project and its dependencies. See http://milindsweb.amved.com/Many2One.html for reference.")	-- Create a parser
+
+parser:argument("configFile")
+	:description("Configuration file for the run.")
+	:default("config.lua")
+	:args("?")
+parser:option("--wd")
+	:description("Specify working directory where. Config file is loaded after changing to working directory.")
+	:args(1)
+	:count("?")
 
 local luaCode = {}
-local args = {...}
-local configFile = args[1] or "Config.lua"
-print("Many2One version 1.17.3.1")
-print("Usage: lua many2one.lua [configFile]")
-print("For usage and help see:  http://milindsweb.amved.com/Many2One.html")
-print(" ")
-local screen = io.output(io.stdout)
-local f=io.open(configFile,"r")
-if f~=nil then 
-	f:close() 
-	-- load the configuration file
-	screen:write("Read Configuration file "..configFile.."...")
-	dofile(configFile)
-	screen:write("DONE\n")
-	if not fileList then
-		print("No fileList table defined by the configuration file. Exiting")
-	else
-		local mf = mainFile or fileList[1]
-		print("Processing the main file: "..mf)
-		for i = 1,#fileList do
-			-- Convert all files except the main file to strings
-			if type(fileList[i]) == "string" and fileList[i] ~= mf or type(fileList[i]) == "table" and fileList[i][1] ~= mf then
-				local fn = (type(fileList[i]) == "string" and fileList[i]) or (type(fileList[i]) == "table" and fileList[i][1])
-				print("Reading "..fn.." to include.")
-				f = io.open(fn,"r")
-				if f ~=nil then
-					local fileStr = f:read("*a")
-					if type(fileList[i]) == "table" then
-						luaCode[fileList[i][2]] = fileStr
-					else
-						luaCode[fileTitle(fileList[i])] = fileStr
+local args = parser:parse()
+--local configFile = args[1] or "Config.lua"
+logger:info("------------------------------------------------------------------")
+logger:info("Many2One version 1.20.08.23")
+logger:info(" ")
+
+local txtExt = {"lua"}			-- List of file extensions that are text files and will be combined with the lua script file
+local exclude = {		-- Any modules that need not be packaged
+	"string",
+	"table",
+	"package",
+	"os",
+	"io",
+	"math",
+	"coroutine",
+	"debug",
+	"utf8"
+}
+local mainFile, outFile, moreExclude, deployDir, clearDeployDir
+
+local configFile = args.configFile or "config.lua"
+-- Change the directory
+local curDir,err = lfs.currentdir()
+if not curDir then
+	logger:error("Cannot determine current directory "..err)
+	os.exit()
+end
+local workingDir = args.wd or curDir
+
+lfs.chdir(workingDir)
+
+local f,msg = io.open(configFile)
+if not f then
+	logger:error("Could not open the configuration file "..configFile)
+	os.exit()
+end
+f:close() 
+-- load the configuration file
+logger:info("Read Configuration file "..configFile.."...")
+dofile(configFile)
+mainFile = _G.mainFile
+txtExt = _G.txtExt or txtExt
+outFile = _G.outFile
+moreExclude = _G.exclude or {}
+deployDir = _G.deployDir or curDir
+clearDeployDir = _G.clearDeployDir
+
+deployDir = diskOP.sanitizePath(deployDir)
+
+if not diskOP.verifyPath(deployDir) then
+	logger:error("Deploy directory "..deployDir.." is not valid.")
+	os.exit()
+end
+
+if clearDeployDir then
+	diskOP.emptyDir(deployDir)
+end
+
+tu.mergeArrays(moreExclude,exclude)
+
+if not mainFile then 
+	logger:error("Need a main file name to package. The configuration file should specify a mainFile.")
+	os.exit()
+end
+
+local fileQ = {
+	{mainFile,"MAIN"}	-- File name and dependency cross reference
+}		-- Table to store files that need to be processed for dependencies
+local reference,maxref
+maxref = 0
+while #fileQ > 0 do
+	logger:info("Reading file "..fileQ[1][1].." to look for dependencies.")
+	f,msg = io.open(fileQ[1][1],"r")
+	if not f then
+		logger:error("Cannot read file: "..msg)
+		os.exit()
+	end
+	local fDat = f:read("*a")
+	f:close()
+	reference = fileQ[1][2]
+	logger:info("File reading done.")
+	-- Search for requires
+	for depends in fDat:gmatch([=[require%s*%(?%s*(%f[%["']..-%f[%]"'])%s*%)?]=]) do 
+		depends = depends:match([=[['"%[%]%=]+(.+)]=])
+		if not luaCode[depends] and not tu.inArray(exclude,depends) then
+			-- Find the dependency using the searchers
+			logger:info("Processing dependency "..depends)
+			local found
+			for i = 2,#package.searchers do
+				local fun,path = package.searchers[i](depends)
+				
+				if type(fun) == "function" then
+					luaCode[depends] = {
+						path = path,
+						reference = reference
+					}
+					maxref = (#reference+#depends) > maxref and (#reference+#depends) or maxref
+					for j = 1,#txtExt do
+						if path:match(txtExt[j].."$") then
+							found = true
+							break
+						end
 					end
-					f:close()
-				end
+					if found then
+						-- Process as a text file
+						logger:info("Process "..path.." as a text file.")
+						f,msg = io.open(path)
+						if not f then
+							logger:error("Cannot read file: "..msg)
+							os.exit()
+						end
+						luaCode[depends].text = f:read("*a")
+						f:close()
+					else
+						logger:info("Process "..path.." as a binary file.")
+					end
+					
+					found = true
+					break
+				end			
+			end		-- for i = 2,#package.searchers do
+			if not found then
+				logger:error("Could not find the dependency "..depends)
+				os.exit()
 			end
-		end	-- for i = 1,#fileList do
-		-- Add the files in the begining of the main file
-		local mainFilePre
-		if loadstring then
-			mainFilePre = [[do
+			-- Add the dependency to fileQ
+			fileQ[#fileQ+1] = luaCode[depends].path ~= mainFile and {luaCode[depends].path,reference.."->"..depends}
+		end		-- if not luaCode[depends] then and not tu.inArray(exclude,depends) 
+	end
+	-- Remove the item from fileQ
+	table.remove(fileQ,1)
+end
+
+logger:info("Write the combined application script")
+local mainFilePre
+if loadstring then
+	mainFilePre = [[do
 	local __MANY2ONEFILES={}
 	local reqCopy = require 
 	require = function(str)
@@ -113,8 +225,8 @@ if f~=nil then
 		end
 	end
 ]]
-		else
-			mainFilePre = [[do
+else
+	mainFilePre = [[do
 	local __MANY2ONEFILES={}
 	local reqCopy = require 
 	require = function(str)
@@ -133,55 +245,103 @@ if f~=nil then
 		end
 	end
 ]]
-		end
-		local addedFiles = {}
-		--[[
-		-- Now find and replace  require in all the read files with the custom code
-		for k,v in pairs(luaCode) do
-			for k1,v1 in pairs(luaCode) do
-				local pre,post = v:find("require%s*%(?%s*[%\"%']"..k1.."[%\"%']%s*%)?%s*")
-				if pre then
-					luaCode[k] = luaCode[k]:gsub("require%s*%(?%s*[%\"%']"..k1.."[%\"%']%s*%)?","requireLuaString('"..k1.."')\n")
-					if not addedFiles[k1] then
-						addedFiles[k1] = true
-					end
-				end
-			end
-		end]]
-		-- Add all files listed in the config
-		for k,v in pairs(luaCode) do
-			addedFiles[k] = true
-		end
-		-- Add all the required files in the beginning of Main file in MailFilePre
-		print("Including all files in the beginning of the output file")
-		for k,v in pairs(addedFiles) do
-			mainFilePre = mainFilePre.."\t__MANY2ONEFILES['"..k.."']="..string.format("%q",luaCode[k]).."\n"
-		end
-		mainFilePre = mainFilePre.."end\n"	-- To end the do scope block
-		-- Now write the main code output file
-		print("Generate the output file")
-		local of = outputFile or "output.lua"
-		local fo = io.open(of,"w+")
-		f = io.open(mf,"r")
-		local mainFileStr = f:read("*a")
-		f:close()
-		-- Replace all require in main file with custom code
-		--[[
-		for k,v in pairs(luaCode) do
-			local pre,post = mainFileStr:find("require%s*%(?%s*[%\"%']"..k.."[%\"%']%s*%)?%s*")
-			if pre then
-				mainFileStr = mainFileStr:gsub("require%s*%(?%s*[%\"%']"..k.."[%\"%']%s*%)?","requireLuaString('"..k.."')\n")
-				if not addedFiles[k] then
-					mainFilePre = mainFilePre.."__MANY2ONEFILES['"..k.."']="..string.format("%q",v).."\n"
-					addedFiles[k] = true
-				end
-			end
-		end]]
-		mainFileStr = mainFilePre..mainFileStr
-		fo:write(mainFileStr)
-		fo:close()
-	end		-- if not fileList then ends
-else
-	print("No Configuration file found. Exiting.")
-end		-- if f~=nil then ends
+end
 
+local sep = package.config:match("(.-)%s")
+
+local copiedFiles = {}
+
+-- Add all the required files in the beginning of Main file in MailFilePre
+logger:info("Including all text files in the beginning of the output file and copying the binaries.")
+local totalText,totalBinary = 0,0
+for k,v in pairs(luaCode) do
+	logger:info("Dependency: "..k.." File: "..v.path)
+	if v.text then
+		mainFilePre = mainFilePre.."\t__MANY2ONEFILES['"..k.."']="..string.format("%q",v.text).."\n"
+		totalText = totalText + 1
+	else
+		-- Copy over the binary file to deployDir here
+		local subst = k:gsub("%.",sep)			-- The whole module name separated by the system separator instead of dots
+		local fileName = diskOP.getFileName(v.path)
+		-- Check if this is a C submodule 
+		local found
+		for p in package.cpath:gmatch("(.-);") do
+			if p:gsub("%?",subst) == v.path then
+				found = true
+				break
+			end
+		end
+		local newPath,newFile
+		if not found then
+			-- Submodule in a C module file (package.searcher[4])
+			subst = k:match("^(.-)%.")
+		end
+		-- figure out the relative path for package
+		newPath = deployDir..subst
+		for i = #v.path,1,-1 do
+			local testPath = newPath..v.path:sub(i,-1)
+			if testPath:sub(-1*(#fileName),-1) == fileName then
+				if fileName ~= diskOP.getFileName(testPath) then
+					testPath = newPath..sep..v.path:sub(i,-1)
+				end
+				newFile = testPath
+				break
+			end
+		end
+		if not newFile then
+			logger:error("Cannot find the new path for dependency "..k.." file: "..v.path)
+			os.exit()
+		end
+		-- newFile is the new file name and location
+		newPath = newFile:sub(1,-1*(#fileName+1))
+		local stat,msg = diskOP.createPath(newPath)
+		if not stat then
+			logger:error("Could not create path "..newPath.." to copy "..fileName)
+			os.exit()
+		end
+		if not copiedFiles[newPath..fileName] then
+			logger:info("Copy file "..v.path.." to "..newPath)
+			stat,msg = diskOP.copyFile(v.path,newPath,fileName)
+			if not stat then
+				logger:error("Could not copy file "..fileName.." to "..newPath..": "..msg)
+				os.exit()
+			end
+			copiedFiles[newPath..fileName] = true
+			totalBinary = totalBinary + 1
+		end
+	end
+end
+mainFilePre = mainFilePre.."end\n"	-- To end the do scope block
+-- Now write the main code output file
+logger:info("Generate the output file")
+local of = deployDir..(outputFile or "output.lua")
+local fo = io.open(of,"w+")
+f = io.open(mainFile,"r")
+local mainFileStr = f:read("*a")
+f:close()
+mainFileStr = mainFilePre..mainFileStr
+fo:write(mainFileStr)
+fo:close()
+-- Now display a summary
+logger:info("#########################################")
+logger:info("                 SUMMARY				  ")
+logger:info("#########################################")
+logger:info("Total Text files = "..totalText)
+logger:info("Total Binary files = "..totalBinary)
+logger:info("Total files = "..(totalText + totalBinary))
+logger:info("TEXT FILES:")
+for k,v in pairs(luaCode) do
+	if v.text then
+		logger:info(v.reference.."->"..k..string.rep(" ",maxref+4-(#v.reference+#k))..v.path)
+	end
+end
+
+logger:info("BINARY FILES:")
+for k,v in pairs(luaCode) do
+	if not v.text then
+		logger:info(v.reference.."->"..k..string.rep(" ",maxref+4-(#v.reference+#k))..v.path)
+	end
+end
+
+lfs.chdir(curDir)
+logger:info("All Done!")
