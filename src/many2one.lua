@@ -69,7 +69,7 @@ parser:option("--wd")
 	:count("?")
 parser:mutex(
 	parser:flag("--lua51")
-		:description("Force Lua 5.1 semantics in the generated output. loadstring will be used to load the module string.")
+		:description("Force Lua 5.1 semantics in the generated output. loadstring will be used to load the module string."),
 	parser:flag("--lua52p")
 		:description("Force Lua 5.2+ semantics in the generated output. load function will be used to load the module string.")
 )
