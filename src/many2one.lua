@@ -67,12 +67,18 @@ parser:option("--wd")
 	:description("Specify working directory where. Config file is loaded after changing to working directory.")
 	:args(1)
 	:count("?")
+parser:mutex(
+	parser:flag("--lua51")
+		:description("Force Lua 5.1 semantics in the generated output. loadstring will be used to load the module string.")
+	parser:flag("--lua52p")
+		:description("Force Lua 5.2+ semantics in the generated output. load function will be used to load the module string.")
+)
 
 local luaCode = {}
 local args = parser:parse()
 --local configFile = args[1] or "Config.lua"
 logger:info("------------------------------------------------------------------")
-logger:info("Many2One version 1.20.08.23")
+logger:info("Many2One version 1.21.08.13")
 logger:info(" ")
 
 local txtExt = {"lua"}			-- List of file extensions that are text files and will be combined with the lua script file
@@ -204,7 +210,7 @@ end
 
 logger:info("Write the combined application script")
 local mainFilePre
-if loadstring then
+if args.lua51 or (not args.lua52p and loadstring) then
 	mainFilePre = [[do
 	local __MANY2ONEFILES={}
 	local reqCopy = require 
