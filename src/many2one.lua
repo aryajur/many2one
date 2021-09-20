@@ -42,9 +42,8 @@ deployDir = "../deploy/"
 ]]
 
 -- TODO:
--- 1. Add a include table to include files which not found through searching for require
--- 2. Remove commented text before doing require search
--- 3. Add option to have __MANY2ONEFILES global
+-- 1. Remove commented text before doing require search
+-- 2. Add option to have __MANY2ONEFILES global
 
 require("submodsearcher")
 
@@ -78,7 +77,7 @@ local luaCode = {}
 local args = parser:parse()
 --local configFile = args[1] or "Config.lua"
 logger:info("------------------------------------------------------------------")
-logger:info("Many2One version 1.21.08.13")
+logger:info("Many2One version 1.21.09.20")
 logger:info(" ")
 
 local txtExt = {"lua"}			-- List of file extensions that are text files and will be combined with the lua script file
@@ -93,7 +92,7 @@ local exclude = {		-- Any modules that need not be packaged
 	"debug",
 	"utf8"
 }
-local mainFile, outFile, moreExclude, deployDir, clearDeployDir
+local mainFile, outFile, moreExclude, deployDir, clearDeployDir, include
 
 local configFile = args.configFile or "config.lua"
 -- Change the directory
@@ -119,6 +118,7 @@ mainFile = _G.mainFile
 txtExt = _G.txtExt or txtExt
 outFile = _G.outFile
 moreExclude = _G.exclude or {}
+include = _G.include or {}
 deployDir = _G.deployDir or curDir
 clearDeployDir = _G.clearDeployDir
 
@@ -143,19 +143,11 @@ end
 local fileQ = {
 	{mainFile,"MAIN"}	-- File name and dependency cross reference
 }		-- Table to store files that need to be processed for dependencies
+
 local reference,maxref
 maxref = 0
-while #fileQ > 0 do
-	logger:info("Reading file "..fileQ[1][1].." to look for dependencies.")
-	f,msg = io.open(fileQ[1][1],"r")
-	if not f then
-		logger:error("Cannot read file: "..msg)
-		os.exit()
-	end
-	local fDat = f:read("*a")
-	f:close()
-	reference = fileQ[1][2]
-	logger:info("File reading done.")
+
+local function addAllRequires(fDat)
 	-- Search for requires
 	for depends in fDat:gmatch([=[require%s*%(?%s*(%f[%["']..-%f[%]"'])%s*%)?]=]) do 
 		depends = depends:match([=[['"%[%]%=]+(.+)]=])
@@ -204,6 +196,29 @@ while #fileQ > 0 do
 			fileQ[#fileQ+1] = luaCode[depends].path ~= mainFile and {luaCode[depends].path,reference.."->"..depends}
 		end		-- if not luaCode[depends] then and not tu.inArray(exclude,depends) 
 	end
+end 
+
+-- First process all the include files
+logger:info("Process all include files")
+reference = "INCLUDE"
+local incFiles = ""
+for i = 1,#include do
+	incFiles = incFiles.."require('"..include[i].."')\n"
+end
+addAllRequires(incFiles)
+
+while #fileQ > 0 do
+	logger:info("Reading file "..fileQ[1][1].." to look for dependencies.")
+	f,msg = io.open(fileQ[1][1],"r")
+	if not f then
+		logger:error("Cannot read file: "..msg)
+		os.exit()
+	end
+	local fDat = f:read("*a")
+	f:close()
+	reference = fileQ[1][2]
+	logger:info("File reading done.")
+	addAllRequires(fDat)
 	-- Remove the item from fileQ
 	table.remove(fileQ,1)
 end
