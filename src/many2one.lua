@@ -158,7 +158,7 @@ local function addAllRequires(fDat)
 			for i = 2,#package.searchers do
 				local fun,path = package.searchers[i](depends)
 				
-				if type(fun) == "function" then
+				if type(fun) == "function" and type(path) == "string" then
 					luaCode[depends] = {
 						path = path,
 						reference = reference
