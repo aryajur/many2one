@@ -171,7 +171,7 @@ local function removeComments(str)
 				if strt and strt == pos + 1 then
 					-- This is a square bracket comment
 					comenc = str:sub(pos+1,stp):gsub("%[","]")
-					print("Square bracket comment at "..strt.." ending with "..comenc)
+					--print("Square bracket comment at "..strt.." ending with "..comenc)
 					pos = stp
 					lastToken = pos
 				else
