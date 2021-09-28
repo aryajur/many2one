@@ -67,6 +67,8 @@ parser:option("--wd")
 	:description("Specify working directory where. Config file is loaded after changing to working directory.")
 	:args(1)
 	:count("?")
+parser:flag("--depwarnonly")
+	:description("Only give warning and not error if a dependency is not found.")
 parser:mutex(
 	parser:flag("--lua51")
 		:description("Force Lua 5.1 semantics in the generated output. loadstring will be used to load the module string."),
@@ -78,7 +80,7 @@ local luaCode = {}
 local args = parser:parse()
 --local configFile = args[1] or "Config.lua"
 logger:info("------------------------------------------------------------------")
-logger:info("Many2One version 1.21.09.20a")
+logger:info("Many2One version 1.21.09.28")
 logger:info(" ")
 
 local txtExt = {"lua"}			-- List of file extensions that are text files and will be combined with the lua script file
@@ -122,6 +124,7 @@ moreExclude = _G.exclude or {}
 include = _G.include or {}
 deployDir = _G.deployDir or curDir
 clearDeployDir = _G.clearDeployDir
+depwarnonly = args.depwarnonly or _G.depwarnonly
 
 deployDir = diskOP.sanitizePath(deployDir)
 
@@ -277,6 +280,7 @@ maxref = 0
 local function addAllRequires(fDat)
 	-- Search for requires
 	for depends in fDat:gmatch([=[require%s*%(?%s*(%f[%["']..-%f[%]"'])%s*%)?]=]) do 
+		--logger:info("Found dependency "..depends)
 		depends = depends:match([=[['"%[%]%=]+(.+)]=])
 		if not luaCode[depends] and not tu.inArray(exclude,depends) then
 			-- Find the dependency using the searchers
@@ -316,11 +320,16 @@ local function addAllRequires(fDat)
 				end			
 			end		-- for i = 2,#package.searchers do
 			if not found then
-				logger:error("Could not find the dependency "..depends)
-				os.exit()
+			    if depwarnonly then
+					logger:warn("Could not find the dependency "..depends)
+				else
+					logger:error("Could not find the dependency "..depends)
+					os.exit()
+				end
+			else
+				-- Add the dependency to fileQ
+				fileQ[#fileQ+1] = luaCode[depends].path ~= mainFile and {luaCode[depends].path,reference.."->"..depends}
 			end
-			-- Add the dependency to fileQ
-			fileQ[#fileQ+1] = luaCode[depends].path ~= mainFile and {luaCode[depends].path,reference.."->"..depends}
 		end		-- if not luaCode[depends] then and not tu.inArray(exclude,depends) 
 	end
 end 
@@ -437,8 +446,12 @@ for k,v in pairs(luaCode) do
 			end
 		end
 		if not newFile then
-			logger:error("Cannot find the new path for dependency "..k.." file: "..v.path)
-			os.exit()
+			if depwarnonly then
+				logger:warn("Cannot find the new path for dependency "..k.." file: "..v.path)
+			else
+				logger:error("Cannot find the new path for dependency "..k.." file: "..v.path)
+				os.exit()
+			end
 		end
 		-- newFile is the new file name and location
 		newPath = newFile:sub(1,-1*(#fileName+1))
