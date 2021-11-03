@@ -80,7 +80,7 @@ local luaCode = {}
 local args = parser:parse()
 --local configFile = args[1] or "Config.lua"
 logger:info("------------------------------------------------------------------")
-logger:info("Many2One version 1.21.09.28")
+logger:info("Many2One version 1.21.11.03")
 logger:info(" ")
 
 local txtExt = {"lua"}			-- List of file extensions that are text files and will be combined with the lua script file
@@ -267,6 +267,7 @@ local function removeComments(str)
 		end
 		pos = pos + 1
 	end
+	strout[#strout + 1] = str:sub(lastToken + 1,pos-1)
 	return table.concat(strout)
 end
 
@@ -309,7 +310,7 @@ local function addAllRequires(fDat)
 							logger:error("Cannot read file: "..msg)
 							os.exit()
 						end
-						luaCode[depends].text = f:read("*a")
+						luaCode[depends].text = removeComments(f:read("*a"))
 						f:close()
 					else
 						logger:info("Process "..path.." as a binary file.")
