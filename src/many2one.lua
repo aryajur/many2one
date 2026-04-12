@@ -278,9 +278,27 @@ local fileQ = {
 local reference,maxref
 maxref = 0
 
+-- Helper: search package.path for a module file (Lua 5.1 compatible)
+local function findModulePath(modname)
+	local sep = package.config:match("(.-)%s")
+	local subst = modname:gsub("%.", sep)
+	local delim = package.config:match(".-%s+(.-)%s")
+	for path in package.path:gmatch("(.-)" .. delim) do
+		if path ~= "" then
+			local filepath = path:gsub("%?", subst)
+			local f = io.open(filepath, "r")
+			if f then
+				f:close()
+				return filepath
+			end
+		end
+	end
+	return nil
+end
+
 local function addAllRequires(fDat)
 	-- Search for requires
-	for depends in fDat:gmatch([=[require%s*%(?%s*(%f[%["']..-%f[%]"'])%s*%)?]=]) do 
+	for depends in fDat:gmatch([=[require%s*%(?%s*(%f[%["']..-%f[%]"'])%s*%)?]=]) do
 		--logger:info("Found dependency "..depends)
 		depends = depends:match([=[['"%[%]%=]+(.+)]=])
 		if not luaCode[depends] and not tu.inArray(exclude,depends) then
@@ -289,7 +307,12 @@ local function addAllRequires(fDat)
 			local found
 			for i = 2,#package.searchers do
 				local fun,path = package.searchers[i](depends)
-				
+
+				-- Some searchers return function without path; try to resolve path manually
+				if type(fun) == "function" and not path then
+					path = findModulePath(depends)
+				end
+
 				if type(fun) == "function" and type(path) == "string" then
 					luaCode[depends] = {
 						path = path,
@@ -484,6 +507,20 @@ f:close()
 mainFileStr = mainFilePre..mainFileStr
 fo:write(mainFileStr)
 fo:close()
+
+-- Postprocess if configured
+if _G.postprocess and type(_G.postprocess) == "function" then
+	logger:info("Running postprocess function...")
+	local processed = _G.postprocess(mainFileStr, deployDir, outputFile or "output.lua")
+	if type(processed) == "string" and processed ~= mainFileStr then
+		mainFileStr = processed
+		fo = io.open(of, "w+")
+		fo:write(mainFileStr)
+		fo:close()
+		logger:info("Output file updated with postprocessed content")
+	end
+end
+
 -- Now display a summary
 logger:info("#########################################")
 logger:info("                 SUMMARY				  ")
